@@ -1,0 +1,219 @@
+<!-- Entry point for using OpenNI devices -->
+<launch>
+
+  <!-- "camera" should uniquely identify the device. All topics are pushed down
+       into the "camera" namespace, and it is prepended to tf frame ids. -->
+  <arg name="camera" default="camera" />
+  <arg name="rgb_frame_id"   default="$(arg camera)_rgb_optical_frame" />
+  <arg name="depth_frame_id" default="$(arg camera)_depth_optical_frame" />
+
+  <!-- device_id can have the following formats:
+         "B00367707227042B": Use device with given serial number
+         "#1"              : Use first device found
+         "2@3"             : Use device on USB bus 2, address 3
+         "2@0"             : Use first device found on USB bus 2
+    -->
+  <arg name="device_id" default="#1" />
+
+  <!-- By default, calibrations are stored to file://${ROS_HOME}/camera_info/${NAME}.yaml,
+       where ${NAME} is of the form "[rgb|depth]_[serial#]", e.g. "depth_B00367707227042B".
+       See camera_info_manager docs for calibration URL details. -->
+  <arg name="rgb_camera_info_url"   default="" />
+  <arg name="depth_camera_info_url" default="" />
+
+  <!-- Use OpenNI's factory-calibrated depth->RGB registration? -->
+  <arg name="depth_registration" default="false" />
+
+  <!-- Arguments for remapping all device namespaces -->
+  <arg name="rgb"                       default="rgb" />
+  <arg name="ir"                        default="ir" />
+  <arg name="depth"                     default="depth" />
+  <arg name="depth_registered"          default="depth_registered" />
+  <arg name="depth_registered_filtered" default="depth_registered" />
+  <arg name="projector"                 default="projector" />
+
+  <!-- Optionally suppress loading the driver nodelet and/or publishing the default tf
+       tree. Useful if you are playing back recorded raw data from a bag, or are
+       supplying a more accurate tf tree from calibration. -->
+  <arg name="load_driver" default="true" />
+  <arg name="publish_tf" default="true" />
+  <!-- Processing Modules -->
+  <arg name="rgb_processing"                  default="true"/>
+  <arg name="ir_processing"                   default="true"/>
+  <arg name="depth_processing"                default="true"/>
+  <arg name="depth_registered_processing"     default="true"/>
+  <arg name="disparity_processing"            default="true"/>
+  <arg name="disparity_registered_processing" default="true"/>
+  <arg name="hw_registered_processing"        default="true" />
+  <arg name="sw_registered_processing"        default="true" />
+
+  <!-- Disable bond topics by default -->
+  <arg name="bond" default="false" /> <!-- DEPRECATED, use respawn arg instead -->
+  <arg name="respawn" default="$(arg bond)" />
+
+  <!-- Worker threads for the nodelet manager -->
+  <arg name="num_worker_threads" default="4" />
+
+  <!-- Push down all topics/nodelets into "camera" namespace -->
+  <group ns="$(arg camera)">
+  
+    <!-- Start nodelet manager in top-level namespace -->
+    <arg name="manager" value="$(arg camera)_nodelet_manager" />
+    <arg name="debug" default="false" /> <!-- Run manager in GDB? -->
+    <include file="$(find rgbd_launch)/launch/includes/manager.launch.xml">
+      <arg name="name"                value="$(arg manager)" />
+      <arg name="debug"               value="$(arg debug)" />
+      <arg name="num_worker_threads"  value="$(arg num_worker_threads)" />
+    </include>
+
+    <!-- Load driver -->
+    <include if="$(arg load_driver)"
+	     file="$(find openni_launch)/launch/includes/device.launch.xml">
+      <!-- Could really use some syntactic sugar for this -->
+      <arg name="manager"               value="$(arg manager)" />
+      <arg name="device_id"             value="$(arg device_id)" />
+      <arg name="rgb_frame_id"          value="$(arg rgb_frame_id)" />
+      <arg name="depth_frame_id"        value="$(arg depth_frame_id)" />
+      <arg name="rgb_camera_info_url"   value="$(arg rgb_camera_info_url)" />
+      <arg name="depth_camera_info_url" value="$(arg depth_camera_info_url)" />
+      <arg name="depth_registration"    value="$(arg depth_registration)" />
+      <arg name="rgb"                   value="$(arg rgb)" />
+      <arg name="ir"                    value="$(arg ir)" />
+      <arg name="depth"                 value="$(arg depth)" />
+      <arg name="depth_registered"      value="$(arg depth_registered)" />
+      <arg name="projector"             value="$(arg projector)" />
+      <arg name="respawn"               value="$(arg respawn)" />
+    </include>
+    
+    <!-- Load standard constellation of processing nodelets -->
+    <include file="$(find rgbd_launch)/launch/includes/processing.launch.xml">
+      <arg name="manager"                         value="$(arg manager)" />
+      <arg name="rgb"                             value="$(arg rgb)" />
+      <arg name="ir"                              value="$(arg ir)" />
+      <arg name="depth"                           value="$(arg depth)" />
+      <arg name="depth_registered"                value="$(arg depth_registered)" />
+      <arg name="depth_registered_filtered"       value="$(arg depth_registered_filtered)" />
+      <arg name="projector"                       value="$(arg projector)" />
+      <arg name="respawn"                         value="$(arg respawn)" />
+      <arg name="rgb_processing"                  value="$(arg rgb_processing)" />
+      <arg name="ir_processing"                   value="$(arg ir_processing)" />
+      <arg name="depth_processing"                value="$(arg depth_processing)" />
+      <arg name="depth_registered_processing"     value="$(arg depth_registered_processing)" />
+      <arg name="disparity_processing"            value="$(arg disparity_processing)" />
+      <arg name="disparity_registered_processing" value="$(arg disparity_registered_processing)" />
+      <arg name="hw_registered_processing"        value="$(arg hw_registered_processing)" />
+      <arg name="sw_registered_processing"        value="$(arg sw_registered_processing)" />
+    </include>
+  
+  </group> <!-- camera -->
+
+  <!-- Load reasonable defaults for the relative pose between cameras -->
+  <include if="$(arg publish_tf)"
+	   file="$(find rgbd_launch)/launch/kinect_frames.launch">
+    <arg name="camera" value="$(arg camera)" />
+  </include>
+
+  <!-- ******************Openni Tracker Node******************** -->
+  <node name="tracker" pkg="openni_tracker" type="openni_tracker" /> 
+
+  <!-- **************Aruco Marker Detection******************** -->
+  <!-- namespace for camera input -->
+  
+  <arg name="camera1" default="/camera/rgb"/>
+  <arg name="image" default="/image_raw"/>
+  <arg name="transport" default="compressed"/>
+  <arg name="fiducial_len" default="0.14"/>
+  <arg name="do_pose_estimation" default="true"/>
+
+  <node pkg="aruco_detect" name="aruco_detect"
+    type="aruco_detect" respawn="false">
+    <param name="image_transport" value="$(arg transport)"/>
+    <param name="publish_images" value="true" />
+    <param name="fiducial_len" value="$(arg fiducial_len)"/>
+    <param name="do_pose_estimation" value="$(arg do_pose_estimation)"/>
+    <remap from="/camera/compressed" 
+        to="$(arg camera1)/$(arg image)/$(arg transport)"/>
+    <remap from="/camera_info" to="$(arg camera1)/camera_info"/>
+  </node>
+  
+
+  <!-- ******************************* Camera_depth_frame to Openni_depth_frame ********************* -->
+  <node pkg="tf2_ros" type="static_transform_publisher" name="openniToCam_broadcaster" args="0 0 0 0 0 0 camera_depth_frame openni_depth_frame" />
+
+
+
+
+  <!-- ******************** Fiducial Array to tf2 ***************** -->
+  <!-- name= node name displayed,  type = actual node name -->
+  <!-- <node name="fiducialToTf2" pkg="iitk_follower" type="pub1.py" /> -->
+
+
+  <!-- ******************* Publish Follow_me transform *********************** -->
+  <node name="pub_followme" pkg="iitk_follower" type="group_follow.py" />
+
+
+
+
+
+  <!-- ********************* TB3 and lidar ************************ -->
+  <include file="$(find turtlebot3_bringup)/launch/turtlebot3_robot.launch"/>
+  
+  <node pkg="laser_filters" type="scan_to_scan_filter_chain" output="screen" name="laser_filter">
+      <!-- <remap from="scan" to="base_scan" /> -->
+      <rosparam command="load" file="/home/luk/catkin_ws/src/iitk_follower/filters/range_filter.yaml" />
+  </node>
+
+  <!-- ****************** static transforms ********************** -->
+  <!-- type = file to launch in the tf2_ros package, name is unique identifier of this running node-->
+  <!-- then frame-id and child frame-->
+  <node pkg="tf2_ros" type="static_transform_publisher" name="openni_base" args="0.17 0 0.17 0 -0.436 0 base_footprint camera_link" />
+
+  <!-- *********************** Publishing command velocity for kobuki ***************** -->
+  <!-- <node name="pub_cmdvel" pkg="beginner_tutorials" type="cmdvel1.py" /> -->
+  <node name="image_view_f" pkg="image_view" type="image_view" args="image:=/fiducial_images" />
+
+ <!--  ************** Cartographer ***************  -->
+  <node name="cartographer_node" pkg="cartographer_ros"
+          type="cartographer_node" args="
+              -configuration_directory $(find cartographer_ros)/configuration_files
+              -configuration_basename revo_lds_alt.lua"
+          output="screen">
+  </node> 
+
+  <node name="cartographer_occupancy_grid_node" pkg="cartographer_ros"
+      type="cartographer_occupancy_grid_node" args="-resolution 0.01" />
+
+
+  <node pkg="tf2_ros" type="static_transform_publisher" name="base_laser_link" args="0.07 0 0.1 3.141592 0 0 base_footprint laser" />
+
+
+<!--  ************** Navigation ***************  -->
+       <node pkg="move_base" type="move_base" respawn="false" name="move_base" output="screen">
+                <rosparam file="$(find teb_local_planner_tutorials)/cfg/diff_drive/costmap_common_params_alt.yaml" command="load" ns="global_costmap" />
+                <rosparam file="$(find teb_local_planner_tutorials)/cfg/diff_drive/costmap_common_params_alt.yaml" command="load" ns="local_costmap" />
+                <rosparam file="$(find teb_local_planner_tutorials)/cfg/diff_drive/local_costmap_params.yaml" command="load" />
+                <rosparam file="$(find teb_local_planner_tutorials)/cfg/diff_drive/global_costmap_params.yaml" command="load" />
+                <rosparam file="$(find teb_local_planner_tutorials)/cfg/diff_drive/teb_local_planner_params.yaml" command="load" />
+                <rosparam file="$(find teb_local_planner_tutorials)/cfg/diff_drive/costmap_converter_params.yaml" command="load" />
+
+                <param name="base_global_planner" value="global_planner/GlobalPlanner" />
+                <param name="planner_frequency" value="5.0" />
+                <param name="planner_patience" value="5.0" />
+
+                <param name="base_local_planner" value="teb_local_planner/TebLocalPlannerROS" />
+                <param name="controller_frequency" value="15.0" />
+                <param name="controller_patience" value="15.0" />
+		<!--why you doing this? -->
+                <!-- <remap from="cmd_vel" to="/mobile_base/commands/velocity"/> -->
+        </node>
+
+
+<!--  **************** Visualisation ****************  -->
+    <node name="rviz_alt" pkg="rviz" type="rviz" args="-d $(find teb_local_planner_tutorials)/cfg/rviz_navigation_alt.rviz"/>
+
+
+
+<!-- *************************************************************** run group_follow.py ************************************************************** -->
+
+</launch>
+
